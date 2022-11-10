@@ -166,6 +166,9 @@ BEGIN {
 /^BEGIN:VEVENT/ {
     # start of an event: initialize global values used for each event
     date = "";
+    by_days = ""
+    split("", days)
+    split("", dates)
     entry = ""
     headline = ""
     icalentry = ""  # the full entry for inspection
@@ -319,6 +322,10 @@ BEGIN {
     freq = tolower(gensub(/.*FREQ=(.).*/, "\\1", 1, $0))
     # get the interval, and use 1 if none specified
     interval =  $2 ~ /INTERVAL=/ ? gensub(/.*INTERVAL=([0-9]+);.*/, "\\1", 1, $2) : 1
+    # RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR;WKST=SU
+    by_days = $2 ~ /BYDAY=/ ? gensub(/.*BYDAY=(((MO|TU|WE|TH|FR|SA|SU),?)+);?.*/, "\\1", "1", $2) : ""
+    if (by_days != "")
+        split(by_days, days, ",")
     # get the enddate of the rule and use "" if none specified
     rrend = $2 ~ /UNTIL=/ ? datestring(gensub(/.*UNTIL=([0-9]{8}).*/, "\\1", 1, $2)) : ""
     rrend_raw = $2 ~ /UNTIL=/ ? gensub(/.*UNTIL=([0-9]{8}).*/, "\\1", 1, $2) : ""
@@ -442,7 +449,15 @@ BEGIN {
                 print "  :END"
             }
             if (!condense)
-                 print "<" date ">"
+            {
+                print "<" date ">"
+                if(by_days != "")
+                {
+                    schedules_by_day(dates, date, days)
+                    for (d in dates)
+                        print "<" dates[d] ">"
+                }
+            }
 
             print ""
             if(length(entry)>1)
@@ -456,6 +471,65 @@ BEGIN {
     }
 }
 
+function schedules_by_day(s, date, days)
+{
+    i = 1
+    if(length(days)>1)
+    {
+        start_day_of_week = day_of_week(date)
+        for (d in days)
+        {
+            string = "(....)-(..)-(..) (...) (..):(..)(.*)?"
+            format = "\\1 \\2 \\3 \\5 \\6 00"
+
+            date_spec = gensub(string, format, "1", date)
+            timestamp = mktime(date_spec)
+            _day_of_week = by_day_to_day_of_week(days[d])
+            if (start_day_of_week == _day_of_week)
+                continue
+
+            # deal with days after start day, i.e. go back to last Sunday (0) and add _day_of_week to it, so that day is in same week
+            if (start_day_of_week < _day_of_week)
+                s[i] = gensub(string, strftime("%Y-%m-%d %a", timestamp + ((- start_day_of_week + _day_of_week) * 60 * 60 * 24)) " \\5:\\6\\7", "1", date)
+            # deal with days before start day, i.e. go forward to next Sunday (0) and add _day_of_week to it, so that day is in next week
+            if (start_day_of_week > _day_of_week)
+                s[i] = gensub(string, strftime("%Y-%m-%d %a", timestamp + ((7 - start_day_of_week + _day_of_week) * 60 * 60 * 24)) " \\5:\\6\\7", "1", date)
+            i++
+        }
+    }
+}
+
+function by_day_to_day_of_week(day)
+{
+    switch(day)
+    {
+      case "SU":
+          return 0;
+      case "MO":
+          return 1;
+      case "TU":
+          return 2;
+      case "WE":
+          return 3;
+      case "TH":
+          return 4;
+      case "FR":
+          return 5;
+      case "SA":
+          return 6;
+    }
+
+}
+
+function day_of_week(date)
+{
+    string = "(....)-(..)-(..) (...) (..):(..).*"
+    format = "\\1 \\2 \\3 \\5 \\6 00"
+
+    date_spec = gensub(string, format, "1", date)
+    timestamp = mktime(date_spec)
+    return strftime("%w", timestamp)
+}
 
 # Join keys in an array, return a string
 function join_keys(input)
